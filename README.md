@@ -35,7 +35,7 @@ Establishes the observational foundation:
 - Transfer function failure confirmed — the system converting forcing to response has degraded
 - Anti-correlation between components (2010–2015) excludes methodological artifacts
 
-### Paper 2: Directional Forcing (COMING SOON)
+### Paper 2: Directional Forcing
 **"Systematic Directional Forcing of Earth's Rotation Pole Toward 75°W: Convergent Evidence from Polar Motion Cusps, Satellite Gravimetry and Geomagnetic Field Correlation (1973–2026)"**
 
 Establishes the directional signature:
