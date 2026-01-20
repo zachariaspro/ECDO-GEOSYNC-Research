@@ -47,7 +47,7 @@ Establishes the directional signature:
 - GRACE gravimetry confirms mass accumulation along same bearing
 - Geomagnetic correlation: r = −0.98
 
-### Paper 3: Coupling Quantification (COMING SOON)
+### Paper 3: Coupling Quantification 
 **"Critical Degradation of Earth's Rotational Coupling Revealed by Transfer Function Inversion and Broadband Polar Motion Analysis (1973–2026)"**
 
 Establishes mechanism and current state:
