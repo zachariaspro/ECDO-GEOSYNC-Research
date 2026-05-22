@@ -1,5 +1,6 @@
 # ECDO-GEOSYNC Research
 **Exothermic Core-Mantle Decoupling – Dzhanibekov Oscillation theory / Geophysical Synchronization Framework**
+
 Independent geophysical research documenting anomalous changes in Earth's rotational dynamics (1846–2026)
 ---
 ## Overview
