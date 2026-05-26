@@ -1,0 +1,3 @@
+finals.all.iau2000.txt
+*.pyc
+__pycache__/
