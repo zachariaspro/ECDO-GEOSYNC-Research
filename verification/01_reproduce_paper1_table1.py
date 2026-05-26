@@ -14,44 +14,10 @@ DATA: Download finals.all.iau2000.txt from
   https://datacenter.iers.org/data/latestVersion/finals.all.iau2000.txt
 and place it next to this script (or set IERS_PATH).
 """
-import os
 import numpy as np
-import pandas as pd
 from scipy.signal import butter, filtfilt, hilbert
 
-IERS_PATH = os.environ.get("IERS_PATH", "finals.all.iau2000.txt")
-
-
-def load_finals(path):
-    """Parse IERS Finals Daily fixed-width file -> DataFrame.
-
-    Columns (per IERS Finals format):
-      [0:2]   YY
-      [2:4]   MM
-      [4:6]   DD
-      [7:15]  MJD
-      [16]    pmflag ('I' final, 'P' predicted, ' ' missing)
-      [18:27] PMx (arcsec)
-      [37:46] PMy (arcsec)
-    """
-    rows = []
-    with open(path) as f:
-        for ln in f:
-            if len(ln) < 60:
-                continue
-            try:
-                mjd = float(ln[7:15])
-                flag = ln[16]
-                pmx_str = ln[18:27].strip()
-                pmy_str = ln[37:46].strip()
-                if not pmx_str or not pmy_str:
-                    continue
-                rows.append((mjd, float(pmx_str) * 1000.0, float(pmy_str) * 1000.0, flag))
-            except ValueError:
-                continue
-    df = pd.DataFrame(rows, columns=["mjd", "px_mas", "py_mas", "flag"])
-    df["year"] = 2000.0 + (df["mjd"] - 51544.5) / 365.25
-    return df.sort_values("mjd").reset_index(drop=True)
+from iers_finals import load_finals, bearing_label
 
 
 def detrend(arr, years):
@@ -68,28 +34,28 @@ def bandpass(signal, fs, lo_d, hi_d, order=3):
 
 
 def main():
-    df = load_finals(IERS_PATH)
-    df_final = df[df["flag"] == "I"].reset_index(drop=True)
-    print(f"Loaded {len(df_final)} final-quality daily records: "
-          f"{df_final['year'].min():.3f} - {df_final['year'].max():.3f}")
+    df = load_finals(only_final=True)
+    print(f"Loaded {len(df)} final-quality daily records: "
+          f"{df['year'].min():.3f} - {df['year'].max():.3f}")
 
-    yrs = df_final["year"].values
-    px = df_final["px_mas"].values.astype(float)
-    py = df_final["py_mas"].values.astype(float)
+    yrs = df["year"].values
+    px = df["px_mas"].values.astype(float)
+    py = df["py_mas"].values.astype(float)
 
     px_d, sx = detrend(px, yrs)
     py_d, sy = detrend(py, yrs)
+    bearing = np.degrees(np.arctan2(sy[0], sx[0]))
     print(f"Secular drift: slope_x={sx[0]:+.3f} mas/yr, slope_y={sy[0]:+.3f} mas/yr")
-    print(f"  => direction {np.degrees(np.arctan2(sy[0], sx[0])):.1f}° W "
-          f"at {np.hypot(sx[0], sy[0]):.2f} mas/yr (1973-{df_final['year'].max():.0f})")
+    print(f"  => bearing {bearing_label(bearing)} at {np.hypot(sx[0], sy[0]):.2f} "
+          f"mas/yr (1973-{df['year'].max():.0f})")
 
     fs = 1.0  # samples per day
     ch_x = bandpass(px_d, fs, 410, 470)
     ch_y = bandpass(py_d, fs, 410, 470)
     an_x = bandpass(px_d, fs, 345, 390)
     an_y = bandpass(py_d, fs, 345, 390)
-    ch_env = np.sqrt(np.abs(hilbert(ch_x)) ** 2 + np.abs(hilbert(ch_y)) ** 2)
-    an_env = np.sqrt(np.abs(hilbert(an_x)) ** 2 + np.abs(hilbert(an_y)) ** 2)
+    ch_env = np.hypot(np.abs(hilbert(ch_x)), np.abs(hilbert(ch_y)))
+    an_env = np.hypot(np.abs(hilbert(an_x)), np.abs(hilbert(an_y)))
 
     n = len(yrs)
     margin = int(0.15 * n)

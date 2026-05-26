@@ -12,48 +12,75 @@ that filter pipeline:
 If the wobble has truly collapsed to a few mas, all three should agree with the
 bandpass/Hilbert result. If the bandpass/Hilbert estimate is being depressed by
 edge behaviour, the other methods will not show that depression.
+
+Lomb-Scargle scaling convention
+-------------------------------
+scipy.signal.lombscargle with normalize=False returns power P(omega). For a
+real signal x_n = A * cos(omega_0 t_n) sampled at N points, the periodogram at
+omega_0 evaluates to approximately P = N * A^2 / 4 (asymptotic; exact value
+depends on sampling). For a 2D circular signal (px = A cos, py = A sin), the
+sum Px + Py = N * A^2 / 2, so the 2D amplitude is recovered as
+
+    A_2D = sqrt(2 * (Px + Py) / N)
+
+This is what `lomb_amp_2d()` below computes, and the calibration test
+`_calibrate_lombscargle()` runs at startup confirms the recovered amplitude on
+a synthetic circular signal of known amplitude.
 """
-import os
 import numpy as np
 import pandas as pd
 from scipy.signal import lombscargle
 
-IERS_PATH = os.environ.get("IERS_PATH", "finals.all.iau2000.txt")
+from iers_finals import load_finals
 
 
-def load_finals(path):
-    rows = []
-    with open(path) as f:
-        for ln in f:
-            if len(ln) < 60:
-                continue
-            try:
-                mjd = float(ln[7:15])
-                flag = ln[16]
-                px_s = ln[18:27].strip()
-                py_s = ln[37:46].strip()
-                if not px_s or not py_s:
-                    continue
-                rows.append((mjd, float(px_s) * 1000, float(py_s) * 1000, flag))
-            except ValueError:
-                continue
-    df = pd.DataFrame(rows, columns=["mjd", "px", "py", "flag"])
-    df["year"] = 2000.0 + (df["mjd"] - 51544.5) / 365.25
-    return df[df["flag"] == "I"].sort_values("mjd").reset_index(drop=True)
+def lomb_amp_2d(t, sx, sy, ang_freqs):
+    """Return 2D Lomb-Scargle peak amplitude over a vector of angular frequencies.
+
+    See the module docstring for the scaling derivation.
+    """
+    N = len(t)
+    Px = lombscargle(t, sx, ang_freqs, normalize=False)
+    Py = lombscargle(t, sy, ang_freqs, normalize=False)
+    return np.sqrt(2.0 * (Px + Py).max() / N)
+
+
+def _calibrate_lombscargle():
+    """Sanity-check the lomb_amp_2d scaling on a synthetic signal.
+
+    Builds a 2D circular oscillation of known amplitude at the Chandler period
+    and confirms that lomb_amp_2d recovers it. Raises AssertionError on failure
+    so a future SciPy convention change can't silently break the amplitude
+    units in the table below.
+    """
+    rng = np.random.default_rng(0)
+    A_true = 100.0
+    period = 433.0
+    N = 365 * 4
+    t = np.arange(N).astype(float) + rng.uniform(0, 1, N)
+    sx = A_true * np.cos(2 * np.pi * t / period)
+    sy = A_true * np.sin(2 * np.pi * t / period)
+    ang = np.linspace(2 * np.pi / 470, 2 * np.pi / 410, 50)
+    A_rec = lomb_amp_2d(t, sx, sy, ang)
+    assert abs(A_rec - A_true) < 1.0, (
+        f"Lomb-Scargle amplitude calibration failed: "
+        f"true {A_true}, recovered {A_rec:.2f}. "
+        f"Check SciPy convention for lombscargle(normalize=False)."
+    )
 
 
 def main():
-    df = load_finals(IERS_PATH)
+    _calibrate_lombscargle()
+
+    df = load_finals(only_final=True)
     y = df["year"].values
-    px = df["px"].values.astype(float)
-    py = df["py"].values.astype(float)
+    px = df["px_mas"].values.astype(float)
+    py = df["py_mas"].values.astype(float)
     cx = np.polyfit(y, px, 1)
     cy = np.polyfit(y, py, 1)
     px -= cx[0] * y + cx[1]
     py -= cy[0] * y + cy[1]
 
-    # Method A: rolling 4-yr mean as baseline (much longer than Chandler+annual,
-    # so it should not distort sub-yr signals)
     long_w = 1500
     bx = pd.Series(px).rolling(long_w, min_periods=long_w // 2, center=True).mean().values
     by = pd.Series(py).rolling(long_w, min_periods=long_w // 2, center=True).mean().values
@@ -93,10 +120,8 @@ def main():
     print("Method C: Lomb-Scargle peak amplitude in Chandler and annual bands")
     print("(4-yr window centered on each test year, no filtfilt, no Hilbert FFT)")
     print(f"{'Center':<10}{'Chandler (mas)':<22}{'Annual (mas)'}")
-    periods_chand = np.linspace(410, 470, 30)
-    periods_ann = np.linspace(345, 390, 30)
-    ang_chand = 2 * np.pi / periods_chand
-    ang_ann = 2 * np.pi / periods_ann
+    ang_chand = 2 * np.pi / np.linspace(410, 470, 30)
+    ang_ann = 2 * np.pi / np.linspace(345, 390, 30)
     for yc in [1980, 1990, 2000, 2010, 2015, 2018, 2020, 2022, 2024, 2025]:
         mask = (y >= yc - 2.0) & (y < yc + 2.0)
         if mask.sum() < 200:
@@ -110,13 +135,8 @@ def main():
         sy = sy[valid]
         if len(t) < 200:
             continue
-        N = len(t)
-        Pxc = lombscargle(t, sx, ang_chand, normalize=False)
-        Pyc = lombscargle(t, sy, ang_chand, normalize=False)
-        Pxa = lombscargle(t, sx, ang_ann, normalize=False)
-        Pya = lombscargle(t, sy, ang_ann, normalize=False)
-        A_c = np.sqrt(2 * (Pxc + Pyc).max() / N)
-        A_a = np.sqrt(2 * (Pxa + Pya).max() / N)
+        A_c = lomb_amp_2d(t, sx, sy, ang_chand)
+        A_a = lomb_amp_2d(t, sx, sy, ang_ann)
         print(f"{yc:6}        {A_c:10.1f}              {A_a:10.1f}")
 
 

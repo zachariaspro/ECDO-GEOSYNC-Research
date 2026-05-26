@@ -14,39 +14,16 @@ A boundary-induced behaviour will give different A(Y) for different T.
 
 This script does not claim either outcome a priori; it just lays out the comparison.
 """
-import os
 import numpy as np
-import pandas as pd
 from scipy.signal import butter, filtfilt, hilbert
 
-IERS_PATH = os.environ.get("IERS_PATH", "finals.all.iau2000.txt")
-
-
-def load_finals(path):
-    rows = []
-    with open(path) as f:
-        for ln in f:
-            if len(ln) < 60:
-                continue
-            try:
-                mjd = float(ln[7:15])
-                flag = ln[16]
-                px_s = ln[18:27].strip()
-                py_s = ln[37:46].strip()
-                if not px_s or not py_s:
-                    continue
-                rows.append((mjd, float(px_s) * 1000, float(py_s) * 1000, flag))
-            except ValueError:
-                continue
-    df = pd.DataFrame(rows, columns=["mjd", "px", "py", "flag"])
-    df["year"] = 2000.0 + (df["mjd"] - 51544.5) / 365.25
-    return df[df["flag"] == "I"].sort_values("mjd").reset_index(drop=True)
+from iers_finals import load_finals
 
 
 def envelope(df_slice):
     y = df_slice["year"].values
-    px = df_slice["px"].values.astype(float).copy()
-    py = df_slice["py"].values.astype(float).copy()
+    px = df_slice["px_mas"].values.astype(float).copy()
+    py = df_slice["py_mas"].values.astype(float).copy()
     cx = np.polyfit(y, px, 1)
     cy = np.polyfit(y, py, 1)
     px -= cx[0] * y + cx[1]
@@ -57,15 +34,15 @@ def envelope(df_slice):
         b, a = butter(3, [(1 / hi_d) / nyq, (1 / lo_d) / nyq], btype="band")
         return filtfilt(b, a, s)
 
-    ch = np.sqrt(np.abs(hilbert(bp(px, 410, 470))) ** 2 +
-                 np.abs(hilbert(bp(py, 410, 470))) ** 2)
-    an = np.sqrt(np.abs(hilbert(bp(px, 345, 390))) ** 2 +
-                 np.abs(hilbert(bp(py, 345, 390))) ** 2)
+    ch = np.hypot(np.abs(hilbert(bp(px, 410, 470))),
+                  np.abs(hilbert(bp(py, 410, 470))))
+    an = np.hypot(np.abs(hilbert(bp(px, 345, 390))),
+                  np.abs(hilbert(bp(py, 345, 390))))
     return y, ch, an
 
 
 def main():
-    df = load_finals(IERS_PATH)
+    df = load_finals(only_final=True)
     truncs = [2018.0, 2020.0, 2022.0, 2024.0, 2026.0, df["year"].max()]
     cache = {}
     for t in truncs:
@@ -97,7 +74,6 @@ def main():
     report("Annual envelope at fixed year, by dataset endpoint",
            lambda t: cache[t][2])
 
-    # Show the U-shape near the actual data edge
     print("Envelope value vs. distance from end of latest dataset:")
     y, ch, an = cache[df["year"].max()]
     for ybe in [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0]:
